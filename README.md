@@ -1,4 +1,4 @@
-# GWP a high-resolution code profiling utility for C/C++ source code
+# GWP a high-resolution code profiler for C/C++ source code
 Statistical code profilers like gprof or perf never worked well for my programs. Yes, they provided clues but never clearly showed where the bottlenecks were. 20 years ago I developed my own code profiler for C/C++ (version 1.1) and I now added thread support to it (version 1.2). In order to use it you have to add the following header and macro's to your program you want to profile:
 ```
 #include "profile.h"
