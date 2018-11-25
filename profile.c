@@ -1,5 +1,5 @@
 /*
-This file is part of GWP 1.2, a profile utility for C/C++ code
+This file is part of GWP 1.2, a high-resolution code profiler for C/C++ code
 Copyright (C) 1998-2018 Gijsbert Wiesenekker <gijsbert.wiesenekker@gmail.com>
 
 GWP is free software: you can redistribute it and/or modify
@@ -392,13 +392,13 @@ void init_profile(void)
 #endif
 
   counter(&count_begin);
-  for (int icall = 0; icall < NCALL; icall++);
+  for (int volatile icall = 0; icall < NCALL; icall++);
   counter(&count_end);
 
   time_for_loop = SECS(count_end, count_begin) / NCALL;
 
   counter(&count_begin);
-  for (int icall = 0; icall < NCALL; icall++) counter(&count_end);
+  for (int volatile icall = 0; icall < NCALL; icall++) counter(&count_end);
 
   time_counter = SECS(count_end, count_begin) / NCALL - time_for_loop;
 }
