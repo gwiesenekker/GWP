@@ -1,5 +1,5 @@
 /*
-This file is part of GWP 1.2, a profile utility for C/C++ code
+This file is part of GWP 1.2, a high-resolution code profiler for C/C++ code
 Copyright (C) 1998-2018 Gijsbert Wiesenekker <gijsbert.wiesenekker@gmail.com>
 
 GWP is free software: you can redistribute it and/or modify
