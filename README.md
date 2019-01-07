@@ -8,13 +8,13 @@ INIT_PROFILE //Called from each thread
 BEGIN_BLOCK("block name") //You can use __func__ for "block name" in functions
 ..
 //return(result); DO NOT USE MULTIPLE RETURNS BUT JUMP TO END_BLOCK
-//result = ; //Set the result
-//goto end_block;
+result = ; //Set the result
+goto end_block;
 ..
 end_block:
 END_BLOCK //Just before the exit or return of the function
 ..
-//return(result);
+return(result);
 ..
 DUMP_PROFILE(VERBOSE) //Called from each thread, VERBOSE can be 0 or 1. Creates files profile-<thread-sequence-number>.txt for each thread.
 ```
