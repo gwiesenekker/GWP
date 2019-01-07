@@ -20,7 +20,7 @@ DUMP_PROFILE(VERBOSE) //Called from each thread, VERBOSE can be 0 or 1. Creates 
 ```
 BLOCKS can be nested and recursion is supported. 
 
-Currently GWP uses hard-coded limits to the number of blocks (BLOCK_MAX), the number of recursive invocations (RECURSE_MAX), the call chain (STACK_MAX) and the number of threads (THREAD_MAX). Increase these as needed if you hit any of these limits.
+Currently GWP uses hard-coded limits for the number of blocks (BLOCK_MAX), the number of recursive invocations (RECURSE_MAX), the call chain (STACK_MAX) and the number of threads (THREAD_MAX). Increase these as needed if you hit any of these limits.
 The macro's expand to code that collect the profile information when your program is compiled with -DPROFILE. Obviously BEGIN_BLOCK/END_BLOCK macro's have to match, so multiple returns within procedures and functions should be avoided.
 
 The profiler needs to collect some information (the time spent, the number of calls, which blocks call which blocks etc) so BEGIN_BLOCK creates static variables in a code block to avoid name-clashes with your current code. Because these variables reside in a code block these are not available outside of this block but END_BLOCK and DUMP_PROFILE need some way to access them. BEGIN_BLOCK therefore links these static variables to global arrays and pointers so that END_BLOCK and DUMP_PROFILE can update and use that information.
