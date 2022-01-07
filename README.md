@@ -3,20 +3,29 @@ Statistical code profilers like gprof or perf never worked well for my programs.
 ```
 #include "profile.h"
 
-INIT_PROFILE //Called from each thread
+ //INIT_PROFILE should be called once by each thread at the start of the program
+INIT_PROFILE
 ..
-BEGIN_BLOCK("block name") //You can use __func__ for "block name" in functions
+ //Bracket each block you want to profile with calls to the macros BEGIN_BLOCK and END_BLOCK
+ //BEGIN_BLOCK has the name of the block as the argument
+ //BEGIN_BLOCK and END_BLOCK typically bracket functions but can be used to bracket anything like for loops etc.
+ //You can use __func__ for "block name" in functions
+ BEGIN_BLOCK("block name")
 ..
-//return(result); DO NOT USE MULTIPLE RETURNS BUT JUMP TO END_BLOCK
-result = ; //Set the result
+//DO NOT USE MULTIPLE RETURNS AS BEGIN_BLOCK and END_BLOCK have to match
+//return(result);
+result = .. ;
 goto end_block;
 ..
 end_block:
-END_BLOCK //Just before the exit or return of the function
+ //Call END_BLOCK at the end of the block or just before the exit or return of the function
+END_BLOCK
 ..
 return(result);
 ..
-DUMP_PROFILE(VERBOSE) //Called from each thread, VERBOSE can be 0 or 1. Creates files profile-<thread-sequence-number>.txt for each thread.
+//DUNP_PROFILE should be called once by each thread at the end of the program
+//VERBOSE can be 0 or 1. Creates files profile-<thread-sequence-number>.txt for each thread.
+DUMP_PROFILE(VERBOSE) 
 ```
 BLOCKS can be nested and recursion is supported. 
 
@@ -25,7 +34,7 @@ The macro's expand to code that collect the profile information when your progra
 
 The profiler needs to collect some information (the time spent, the number of calls, which blocks call which blocks etc) so BEGIN_BLOCK creates static variables in a code block to avoid name-clashes with your current code. Because these variables reside in a code block these are not available outside of this block but END_BLOCK and DUMP_PROFILE need some way to access them. BEGIN_BLOCK therefore links these static variables to global arrays and pointers so that END_BLOCK and DUMP_PROFILE can update and use that information.
 
-GWP uses the following method to clearly separate the time spent in your code and the time needed to collect the profiling information (the profile overhead): when BEGIN_BLOCK/END_BLOCK are entered the time is recorded (you could say that the stopwatch for your code is stopped and the stopwatch for the profiler is started) and when it exited the time is recorded again (the stopwatch for the profiler is stopped and for your code is started again).
+GWP uses the following method to clearly separate the time spent in your code and the time needed to collect the profiling information (the profile overhead): when BEGIN_BLOCK/END_BLOCK are entered the time is recorded (you could say that the stopwatch for your code is stopped and the stopwatch for the profiler is started) and when it exited the time is recorded again (the stopwatch for the profiler is stopped and is started again for your code).
 
 Profiling recursive procedures and functions is not easy. GWP solves this problem by profiling each invocation separately. DUMP_PROFILE shows both the time spent in each invocation and summed over invocations.
 
