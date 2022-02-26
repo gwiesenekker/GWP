@@ -1,5 +1,5 @@
 # GWP a high-resolution code profiler for C/C++ source code
-Statistical code profilers like gprof or perf never worked well for my programs. Yes, they provided clues but never clearly showed where the bottlenecks were. 20 years ago I developed my own code profiler for C/C++ (version 1.1) and I now added thread support to it (version 1.2). In order to use it you have to add the following header and macro's to your program you want to profile:
+Statistical code profilers like gprof or perf never worked well for my programs. Yes, they provided clues but never clearly showed where the bottlenecks were. 20 years ago I developed my own code profiler for C/C++ (version 1.1) and I now added thread support to it (version 1.2). In order to use it you have to add the file profile.c to your build and add the following header and macro's to your program you want to profile:
 ```
 #include "profile.h"
 
@@ -32,13 +32,13 @@ BLOCKS can be nested and recursion is supported.
 Currently GWP uses hard-coded limits for the number of blocks (BLOCK_MAX), the number of recursive invocations (RECURSE_MAX), the call chain (STACK_MAX) and the number of threads (THREAD_MAX). Increase these as needed if you hit any of these limits.
 The macro's expand to code that collect the profile information when your program is compiled with -DPROFILE. Obviously BEGIN_BLOCK/END_BLOCK macro's have to match, so multiple returns within procedures and functions should be avoided.
 
-The profiler needs to collect some information (the time spent, the number of calls, which blocks call which blocks etc) so BEGIN_BLOCK creates static variables in a code block to avoid name-clashes with your current code. Because these variables reside in a code block these are not available outside of this block but END_BLOCK and DUMP_PROFILE need some way to access them. BEGIN_BLOCK therefore links these static variables to global arrays and pointers so that END_BLOCK and DUMP_PROFILE can update and use that information.
+The profiler needs to collect some information (the time spent, the number of calls, which blocks call which blocks etc) so BEGIN_BLOCK creates static variables in a code block to store this information and to avoid name-clashes with your current code. Because these variables reside in a code block, these are not available outside of this block but END_BLOCK and DUMP_PROFILE need some way to access them. BEGIN_BLOCK links these static variables to global arrays and pointers so that END_BLOCK and DUMP_PROFILE can update and use that information.
 
-GWP uses the following method to clearly separate the time spent in your code and the time needed to collect the profiling information (the profile overhead): when BEGIN_BLOCK/END_BLOCK are entered the time is recorded (you could say that the stopwatch for your code is stopped and the stopwatch for the profiler is started) and when it exited the time is recorded again (the stopwatch for the profiler is stopped and is started again for your code).
+GWP uses the following method to clearly separate the time spent in your code and the time needed to collect the profiling information (the profile overhead): when BEGIN_BLOCK/END_BLOCK are entered the time is recorded (you could say that the stopwatch for your code is stopped and the stopwatch for the profiler is started) and when BEGIN_BLOCK/END_BLOCK are exited the time is recorded again (the stopwatch for the profiler is stopped and is started again for your code).
 
 Profiling recursive procedures and functions is not easy. GWP solves this problem by profiling each invocation separately. DUMP_PROFILE shows both the time spent in each invocation and summed over invocations.
 
-If block names are larger than 32 characters DUMP_PROFILE will shorten them by removing vowels and underscores from the right until they fit.
+DUMP_PROFILE will shorten large block names by removing vowels and underscores from the right until they are smaller than 32 characters.
 
 Here are the results for a 30 second run of my Draughts program GWD:
 ```
