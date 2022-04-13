@@ -1,15 +1,20 @@
 # GWP a high-resolution code profiler for C/C++ source code
+
 Statistical code profilers like gprof or perf never worked well for my programs. Yes, they provided clues but never clearly showed where the bottlenecks were. 20 years ago I developed my own code profiler for C/C++ (version 1.1) and I now added thread support to it (version 1.2). In order to use it you have to add the file profile.c to your build and add the following header and macro's to your program you want to profile:
 ```
 #include "profile.h"
 
- //INIT_PROFILE should be called once by each thread at the start of the program
+ //INIT_PROFILE should be called once by the main program BEFORE any threads are started
 INIT_PROFILE
 ..
  //Bracket each block you want to profile with calls to the macros BEGIN_BLOCK and END_BLOCK
  //BEGIN_BLOCK has the name of the block as the argument
  //BEGIN_BLOCK and END_BLOCK typically bracket functions but can be used to bracket anything like for loops etc.
  //You can use __func__ for "block name" in functions
+ //Both the main program and the threads should bracket the main program/thread code with a block "main-thread"
+ 
+ BGIN_BLOCK("main-thread")
+ 
  BEGIN_BLOCK("block name")
 ..
 //DO NOT USE MULTIPLE RETURNS AS BEGIN_BLOCK and END_BLOCK have to match
@@ -23,22 +28,79 @@ END_BLOCK
 ..
 return(result);
 ..
-//DUNP_PROFILE should be called once by each thread at the end of the program
+//DUMP_PROFILE should be called once by each thread at the end of the thread 
 //VERBOSE can be 0 or 1. Creates files profile-<thread-sequence-number>.txt for each thread.
+
+END_BLOCK
 DUMP_PROFILE(VERBOSE) 
 ```
-BLOCKS can be nested and recursion is supported. 
+BLOCKS can be nested and recursion is supported.
 
-Currently GWP uses hard-coded limits for the number of blocks (BLOCK_MAX), the number of recursive invocations (RECURSE_MAX), the call chain (STACK_MAX) and the number of threads (THREAD_MAX). Increase these as needed if you hit any of these limits.
 The macro's expand to code that collect the profile information when your program is compiled with -DPROFILE. Obviously BEGIN_BLOCK/END_BLOCK macro's have to match, so multiple returns within procedures and functions should be avoided.
 
-The profiler needs to collect some information (the time spent, the number of calls, which blocks call which blocks etc) so BEGIN_BLOCK creates static variables in a code block to store this information and to avoid name-clashes with your current code. Because these variables reside in a code block, these are not available outside of this block but END_BLOCK and DUMP_PROFILE need some way to access them. BEGIN_BLOCK links these static variables to global arrays and pointers so that END_BLOCK and DUMP_PROFILE can update and use that information.
+Currently GWP uses hard-coded limits for the number of blocks (BLOCK_MAX), the number of recursive invocations (RECURSE_MAX), the call chain (STACK_MAX) and the number of threads (THREAD_MAX). Increase these as needed if you hit any of these limits.
+
+## Method
+
+GWP needs to collect some information (the time spent, the number of calls, which blocks call which blocks etc) so BEGIN_BLOCK creates static variables in a code block to store this information and to avoid name-clashes with your current code. Because these variables reside in a code block, these are not available outside of this block but END_BLOCK and DUMP_PROFILE need some way to access them. BEGIN_BLOCK links these static variables to global arrays and pointers so that END_BLOCK and DUMP_PROFILE can update and use that information.
 
 GWP uses the following method to clearly separate the time spent in your code and the time needed to collect the profiling information (the profile overhead): when BEGIN_BLOCK/END_BLOCK are entered the time is recorded (you could say that the stopwatch for your code is stopped and the stopwatch for the profiler is started) and when BEGIN_BLOCK/END_BLOCK are exited the time is recorded again (the stopwatch for the profiler is stopped and the stopwatch for your code is started again).
+
+The call stack records the times and the blocks being started and stopped. If there are no nested blocks the code looks like:
+```
+//BEGIN_BLOCK
+Record the time (t1)
+Do some administration (the profile overhead):
+  Store t1 (confusingly called counter_overhead_begin)
+  Record the block in the stack frame
+  Setup a pointer that will record the starting time t2 in stack_counter_begin
+  Record the time (t2) and store it in that pointer
+
+//END_BLOCK
+Record the time (t3)
+Do some administration (the profile overhead):
+  //Self and total time are the same if there are no nested blocks
+  Increment the self-time of the block with (t3 - t2)
+  Increment the total-time of the block with (t3 - t2)
+  Record the time (t4)
+  Store t4 (confusingly called counter_overhead_end)
+  Increment the total-time with (t4 - t1)
+
+The profile overhead will be (total-time) - (the self-time of the block)
+```
+For nested blocks the code looks like:
+```
+//BEGIN_BLOCK
+Record the time (t1)
+  Do some administration (the profile overhead):
+    //Stop the clock in the previous stack frame and update the self time
+    Previous stack_counter_end = t1
+    Increment previous stack_time_self = (t1 - previous stack_counter_begin)
+  Record the block in the stack frame
+  Setup a pointer that will record the time t2 in stack_counter_begin
+Record the time (t2) and store it in that pointer
+
+//END_BLOCK
+Record the time (t3)
+  Do some administration (the profile overhead):
+  Increment the self-time of the block with (t3 - t2)
+  Increment the total-time of the block with (t3 - t2)
+    Increment previous stack_time_total with current stack_time_total
+    Setup a pointer that will record the time t4 in previous stack_counter_begin
+Record the time (t4)
+Store t4 in that pointer
+```
+So the minimum unavoidable or intrinsic profile overhead is the sequence
+```
+Record the time t1
+Store the time t2 in a pointer
+```
 
 Profiling recursive procedures and functions is not easy. GWP solves this problem by profiling each invocation separately. DUMP_PROFILE shows both the time spent in each invocation and summed over invocations.
 
 DUMP_PROFILE will shorten large block names by removing vowels and underscores from the right until they are smaller than 32 characters.
+
+## Example
 
 Here are the results for a 30 second run of my Draughts program GWD:
 ```
