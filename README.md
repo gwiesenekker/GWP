@@ -28,10 +28,11 @@ END_BLOCK
 ..
 return(result);
 ..
+END_BLOCK
+
 //DUMP_PROFILE should be called once by each thread at the end of the thread 
 //VERBOSE can be 0 or 1. Creates files profile-<thread-sequence-number>.txt for each thread.
 
-END_BLOCK
 DUMP_PROFILE(VERBOSE) 
 ```
 BLOCKS can be nested and recursion is supported.
@@ -90,14 +91,147 @@ Record the time (t3)
 Record the time (t4)
 Store t4 in that pointer
 ```
+## Intrinsic profile overhead
 So the minimum unavoidable or intrinsic profile overhead is the sequence
 ```
 Record the time t1
 Store the time t2 in a pointer
 ```
+Ideally (t2 - t1) should be zero if there is no code executed between t1 and t2. Recently I started to notice some strange results when profiling small functions (less than 100 ticks) that were called many times, so I decided to take a look at how large the intrinsic profile overhead is using the following program. You can compile it standalone if you are interested in what the intrinsic profile overhead is on your platform.
+
+```
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+#include <math.h>
+
+#define COUNTER_VARIABLE(V)\
+  {struct timespec tv; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &tv); V = tv.tv_sec * 1000000000 + tv.tv_nsec;}
+#define COUNTER_POINTER(P)\
+  {struct timespec tv; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &tv); *(P) = tv.tv_sec * 1000000000 + tv.tv_nsec;}
+
+
+void update_mean_sigma(long long n, long long x,
+  long long *xmax, double *mn, double *sn)
+{
+  double mnm1 = *mn;
+  double snm1 = *sn;
+
+  if (xmax != NULL)
+  {
+    if (x > *xmax) *xmax = x;
+  }
+
+  *mn = mnm1 + (x - mnm1) / n;
+  
+  *sn = snm1 + (x - mnm1) * (x - *mn);
+}
+
+#define NCALL 1000000LL
+
+int main(int argc, char **argv)
+{
+  unsigned long long volatile counter_dummy;
+  unsigned long long volatile *counter_pointer;
+
+  counter_pointer = &counter_dummy;
+  
+  for (int j = 0; j < 10; j++)
+  {
+    double mn = 0.0;
+    double sn = 0.0;
+  
+    for (long long n = 1; n <= NCALL; ++n)
+    {
+      unsigned long long volatile counter_stamp;
+    
+      COUNTER_VARIABLE(counter_stamp)
+      COUNTER_POINTER(counter_pointer)
+    
+      update_mean_sigma(n, counter_dummy - counter_stamp, NULL, &mn, &sn);
+    }
+
+    //note that the distribution is very skewed, so the distribution
+    //is not normal
+    //deviations LESS than the mean (or the mean - sigma) hardly ever occur
+    //but deviations LRRGER than (mean + sigma) do occur more often
+ 
+    //arbitrarily set the standard deviation to one-third of the mean
+    //to check for large positive deviations
+    //sigma = round(sqrt(sigma / NCALL));
+
+    long long sigma = round(mn / 3.0);
+    long long mean = round(mn);
+
+    long long nlarge = 0;
+    long long largest = 0;
+
+    for (long long n = 1; n <= NCALL; ++n)
+    {
+      unsigned long long volatile counter_stamp;
+    
+      COUNTER_VARIABLE(counter_stamp)
+      COUNTER_POINTER(counter_pointer)
+    
+      long long delta = counter_dummy - counter_stamp;
+
+      if (delta > largest) largest = delta;
+      if (delta > (mean + 3 * sigma)) nlarge++;
+    }
+
+    printf("NCALL=%lld mean=%lld nlarge=%lld largest=%lld\n",
+      NCALL, mean, nlarge, largest);
+  }
+}
+```
+
+The program returns the mean value of t2 - t1, the number of deviations larger than twice the mean and the largest value of t2 - t1. On my AMD 1950X the results are:
+
+```
+$ a.out
+NCALL=1000000 mean=190 nlarge=127 largest=5470
+NCALL=1000000 mean=191 nlarge=184 largest=13415
+NCALL=1000000 mean=192 nlarge=146 largest=30578
+NCALL=1000000 mean=195 nlarge=124 largest=9518
+NCALL=1000000 mean=187 nlarge=153 largest=4639
+NCALL=1000000 mean=193 nlarge=140 largest=15599
+NCALL=1000000 mean=192 nlarge=142 largest=9498
+NCALL=1000000 mean=193 nlarge=155 largest=4850
+NCALL=1000000 mean=190 nlarge=158 largest=4880
+NCALL=1000000 mean=191 nlarge=136 largest=5089
+```
+So the intrinsic profile overhead is 190 ticks which is far from negligible when profiling small functions, so we have to correct for it. But as you can see from the results you cannot get it perfectly right as the mean is not constant and sometimes (100 times out of 1M samples) a very large value is returned. I do not know why, it could be related to the performance counters on an AMD 1950X, it could be related to the Linux kernel or to the general problem of returning a meaningful high-resolution thread-specific timer on modern processors. Even if you execute the program on one CPU using taskset the results are not constant:
+
+```
+$ taskset --cpu-list 0 a.out
+NCALL=1000000 mean=188 nlarge=121 largest=6893
+NCALL=1000000 mean=182 nlarge=117 largest=4317
+NCALL=1000000 mean=185 nlarge=103 largest=7664
+NCALL=1000000 mean=184 nlarge=120 largest=8255
+NCALL=1000000 mean=184 nlarge=120 largest=4778
+NCALL=1000000 mean=187 nlarge=117 largest=10550
+NCALL=1000000 mean=185 nlarge=108 largest=9858
+NCALL=1000000 mean=187 nlarge=130 largest=7123
+NCALL=1000000 mean=187 nlarge=97 largest=8465
+NCALL=1000000 mean=187 nlarge=114 largest=5119
+$ taskset --cpu-list 7 a.out
+NCALL=1000000 mean=187 nlarge=207 largest=45776
+NCALL=1000000 mean=187 nlarge=142 largest=44513
+NCALL=1000000 mean=189 nlarge=136 largest=43692
+NCALL=1000000 mean=189 nlarge=139 largest=44804
+NCALL=1000000 mean=186 nlarge=145 largest=44233
+NCALL=1000000 mean=189 nlarge=167 largest=44834
+NCALL=1000000 mean=190 nlarge=155 largest=43612
+NCALL=1000000 mean=188 nlarge=155 largest=44533
+NCALL=1000000 mean=188 nlarge=182 largest=44244
+NCALL=1000000 mean=189 nlarge=172 largest=44163
+```
+Oddly, for one CPU (7) my AMD 1950x always returns very large largest deviations. So how should we correct for the intrinsic profile overhead? GWP uses the following method: after calculating t2 - t1, GWP takes two samples of the intrinsic profile overhead and subtracts it from t2 - t1. The idea of sampling instead of using a fixed value for the intrinsic profile overhead is that it adjusts for the intrinsic profile overhead at that point in time (perhaps the processor is 'slow'), but as you cannot know which value of the intrinsic profile overhead will be returned this will always be an approximation. It can also happen that (t2 - t1) minus the intrinsic profile overhead is less that zero, especially if a large value for the intrinsic profile overhead is returned. In that case GWP returns zero.
+So how well does the correction work? The self-times of the 
+
+## Recursion
 
 Profiling recursive procedures and functions is not easy. GWP solves this problem by profiling each invocation separately. DUMP_PROFILE shows both the time spent in each invocation and summed over invocations.
-
 DUMP_PROFILE will shorten large block names by removing vowels and underscores from the right until they are smaller than 32 characters.
 
 ## Example
