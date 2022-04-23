@@ -1,4 +1,4 @@
-# GWP a high-resolution code profiler for C/C++ source code
+# GWP a high-resolution code profiler for Linux C/C++ source code
 
 Statistical code profilers like gprof or perf never worked well for my programs. Yes, they provided clues but never clearly showed where the bottlenecks were. 20 years ago I developed my own code profiler for C/C++ (version 1.1) and I now added thread support to it (version 1.2). In order to use it you have to add the file profile.c to your build and add the following header and macro's to your program you want to profile:
 ```
@@ -11,7 +11,12 @@ INIT_PROFILE
  //BEGIN_BLOCK has the name of the block as the argument
  //BEGIN_BLOCK and END_BLOCK typically bracket functions but can be used to bracket anything like for loops etc.
  //You can use __func__ for "block name" in functions
- //Both the main program and the threads should bracket the main program/thread code with a block "main-thread"
+ //The main program should bracket main with a block called "main"
+ //Optionally the main program and the threads should bracket the part of the main program/the part of the thread 
+ //where most of the time is spent with a block called "main-thread". The self-time percentages will be calculated against 
+ //main-thread or main in that order.
+ 
+ BEGIN_BLOCK("main")
  
  BGIN_BLOCK("main-thread")
  
@@ -28,6 +33,9 @@ END_BLOCK
 ..
 return(result);
 ..
+//main-thread
+END_BLOCK
+//main
 END_BLOCK
 
 //DUMP_PROFILE should be called once by each thread at the end of the thread 
@@ -43,62 +51,63 @@ Currently GWP uses hard-coded limits for the number of blocks (BLOCK_MAX), the n
 
 ## Method
 
-GWP needs to collect some information (the time spent, the number of calls, which blocks call which blocks etc) so BEGIN_BLOCK creates static variables in a code block to store this information and to avoid name-clashes with your current code. Because these variables reside in a code block, these are not available outside of this block but END_BLOCK and DUMP_PROFILE need some way to access them. BEGIN_BLOCK links these static variables to global arrays and pointers so that END_BLOCK and DUMP_PROFILE can update and use that information.
+GWP needs to collect some information (the time spent, the number of calls, which blocks call which blocks etc.) so BEGIN_BLOCK creates static variables in a code block to store this information AND to avoid name-clashes with your current code. Because these variables reside in a code block, these are not available outside of this block, but END_BLOCK and DUMP_PROFILE need some way to access them. BEGIN_BLOCK links these static variables to global arrays and pointers so that END_BLOCK and DUMP_PROFILE can update and use that information.
 
-GWP uses the following method to clearly separate the time spent in your code and the time needed to collect the profiling information (the profile overhead): when BEGIN_BLOCK/END_BLOCK are entered the time is recorded (you could say that the stopwatch for your code is stopped and the stopwatch for the profiler is started) and when BEGIN_BLOCK/END_BLOCK are exited the time is recorded again (the stopwatch for the profiler is stopped and the stopwatch for your code is started again).
+GWP uses the following method to clearly separate the time spent in your code and the time needed to collect the profile information (the profile overhead): when BEGIN_BLOCK/END_BLOCK are entered the time is recorded (you could say that the stopwatch for your code is stopped and the stopwatch for the profiler is started), when BEGIN_BLOCK/END_BLOCK are exited the time is recorded again (the stopwatch for the profiler is stopped and the stopwatch for your code is started again).
 
-The call stack records the times and the blocks being started and stopped. If there are no nested blocks the code looks like:
+The call stack records the start and stop times AND the blocks being started and stopped. If there are no nested blocks the pseudo-code looks like:
 ```
 //BEGIN_BLOCK
-Record the time (t1)
-Do some administration (the profile overhead):
-  Store t1 (confusingly called counter_overhead_begin)
-  Record the block in the stack frame
-  Setup a pointer that will record the starting time t2 in stack_counter_begin
-  Record the time (t2) and store it in that pointer
+Record the time t1
+  Do some administration (the profile overhead):
+    Store t1 (confusingly called counter_overhead_begin)
+    Link the block to the stack frame
+    Setup a pointer that will record the start time of the block t2 in stack_counter_begin
+    Record the time t2 and store it in that pointer
 
 //END_BLOCK
-Record the time (t3)
-Do some administration (the profile overhead):
-  //Self and total time are the same if there are no nested blocks
-  Increment the self-time of the block with (t3 - t2)
-  Increment the total-time of the block with (t3 - t2)
-  Record the time (t4)
-  Store t4 (confusingly called counter_overhead_end)
-  Increment the total-time with (t4 - t1)
+Record the time t3
+  Do some administration (the profile overhead):
+    //Self and total time are the same if there are no nested blocks
+    Increment the self-time of the block with t3 - t2
+    Increment the total-time of the block with t3 - t2
+    Record the time t4
+    Store t4 (confusingly called counter_overhead_end)
+    Increment the total-time with t4 - t1
 
-The profile overhead will be (total-time) - (the self-time of the block)
+The profile overhead will be total-time - the self-time of the block
 ```
-For nested blocks the code looks like:
+For nested blocks the pseudo-code looks like:
 ```
 //BEGIN_BLOCK
-Record the time (t1)
+Record the time t1
   Do some administration (the profile overhead):
     //Stop the clock in the previous stack frame and update the self time
     Previous stack_counter_end = t1
-    Increment previous stack_time_self = (t1 - previous stack_counter_begin)
-  Record the block in the stack frame
-  Setup a pointer that will record the time t2 in stack_counter_begin
-Record the time (t2) and store it in that pointer
+    Increment previous stack_time_self = t1 - previous stack_counter_begin
+    Link the block to the stack frame
+    Setup a pointer that will record the time t2 in stack_counter_begin
+    Record the time t2 and store it in that pointer
 
 //END_BLOCK
-Record the time (t3)
+Record the time t3
   Do some administration (the profile overhead):
-  Increment the self-time of the block with (t3 - t2)
-  Increment the total-time of the block with (t3 - t2)
+    Increment the self-time of the block with t3 - t2
+    Increment the total-time of the block with t3 - t2
     Increment previous stack_time_total with current stack_time_total
     Setup a pointer that will record the time t4 in previous stack_counter_begin
-Record the time (t4)
-Store t4 in that pointer
+    Record the time t4
+    Store t4 in that pointer
 ```
+
 ## Intrinsic profile overhead
-So the minimum unavoidable or intrinsic profile overhead is the sequence
+
+So the minimum unavoidable or intrinsic profile overhead is the sequence:
 ```
 Record the time t1
 Store the time t2 in a pointer
 ```
-Ideally (t2 - t1) should be zero if there is no code executed between t1 and t2. Recently I started to notice some strange results when profiling small functions (less than 100 ticks) that were called many times, so I decided to take a look at how large the intrinsic profile overhead is using the following program. You can compile it standalone if you are interested in what the intrinsic profile overhead is on your platform.
-
+Ideally t2 - t1 should be zero if there is no code executed between t1 and t2. Recently I started to notice some strange results when profiling small functions (less than 100 ticks) that were called many times, so I decided to take a look at how large the intrinsic profile overhead is using the following program. You can compile it standalone if you are interested in what the intrinsic profile overhead looks like on your system.
 ```
 #include <stdio.h>
 #include <stdlib.h>
@@ -109,7 +118,6 @@ Ideally (t2 - t1) should be zero if there is no code executed between t1 and t2.
   {struct timespec tv; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &tv); V = tv.tv_sec * 1000000000 + tv.tv_nsec;}
 #define COUNTER_POINTER(P)\
   {struct timespec tv; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &tv); *(P) = tv.tv_sec * 1000000000 + tv.tv_nsec;}
-
 
 void update_mean_sigma(long long n, long long x,
   long long *xmax, double *mn, double *sn)
@@ -184,7 +192,6 @@ int main(int argc, char **argv)
   }
 }
 ```
-
 The program returns the mean value of t2 - t1, the number of deviations larger than twice the mean and the largest value of t2 - t1. On my AMD 1950X the results are:
 
 ```
@@ -200,8 +207,7 @@ NCALL=1000000 mean=193 nlarge=155 largest=4850
 NCALL=1000000 mean=190 nlarge=158 largest=4880
 NCALL=1000000 mean=191 nlarge=136 largest=5089
 ```
-So the intrinsic profile overhead is 190 ticks which is far from negligible when profiling small functions, so we have to correct for it. But as you can see from the results you cannot get it perfectly right as the mean is not constant and sometimes (100 times out of 1M samples) a very large value is returned. I do not know why, it could be related to the performance counters on an AMD 1950X, it could be related to the Linux kernel or to the general problem of returning a meaningful high-resolution thread-specific timer on modern processors. Even if you execute the program on one CPU using taskset the results are not constant:
-
+So the intrinsic profile overhead is 190 ticks on average which is far from negligible when profiling small functions, so we have to correct for it. But as you can see from the results you cannot get the correction perfectly right as the mean is not constant and sometimes (100 times out of 1M samples) a very large value is returned. I do not know why, it could be related to the performance counters on an AMD 1950X, it could be related to the Linux kernel or to the general problem of returning a meaningful high-resolution thread-specific timer on modern processors. Even if you execute the program on one CPU using taskset the results are not constant:
 ```
 $ taskset --cpu-list 0 a.out
 NCALL=1000000 mean=188 nlarge=121 largest=6893
@@ -226,17 +232,65 @@ NCALL=1000000 mean=188 nlarge=155 largest=44533
 NCALL=1000000 mean=188 nlarge=182 largest=44244
 NCALL=1000000 mean=189 nlarge=172 largest=44163
 ```
-Oddly, for one CPU (7) my AMD 1950x always returns very large largest deviations. So how should we correct for the intrinsic profile overhead? GWP uses the following method: after calculating t2 - t1, GWP takes two samples of the intrinsic profile overhead and subtracts it from t2 - t1. The idea of sampling instead of using a fixed value for the intrinsic profile overhead is that it adjusts for the intrinsic profile overhead at that point in time (perhaps the processor is 'slow'), but as you cannot know which value of the intrinsic profile overhead will be returned this will always be an approximation. It can also happen that (t2 - t1) minus the intrinsic profile overhead is less that zero, especially if a large value for the intrinsic profile overhead is returned. In that case GWP returns zero.
-So how well does the correction work? The self-times of the 
+Oddly, for one CPU (7) my AMD 1950x always returns very large largest deviations. So how should we correct for the intrinsic profile overhead? GWP uses the following method: after calculating t2 - t1 or t3 - t2, GWP takes two samples of the intrinsic profile overhead and subtracts it from t2 - t1 or t3 - t2. The idea of sampling instead of using a fixed value for the intrinsic profile overhead is that it adjusts for the intrinsic profile overhead at that point in time (perhaps the processor is 'slow'), but as you cannot know which value of the intrinsic profile overhead will be returned it will always be an approximation. It can also happen that t2 - t1 or t3 - t2 minus the intrinsic profile overhead is less that zero, especially if a large value for the intrinsic profile overhead is returned. In that case GWP returns zero.
+
+So how well does the correction work? The self-times of all the following blocks should be 0 ticks:
+```
+  for (long long n = 1; n <= NVALIDATE; ++n)
+  {
+    BEGIN_BLOCK("profile-0-0")
+    END_BLOCK
+  
+    BEGIN_BLOCK("profile-1-1")
+      BEGIN_BLOCK("profile-1-1-0")
+      END_BLOCK
+    END_BLOCK
+  
+    BEGIN_BLOCK("profile-2-2")
+      BEGIN_BLOCK("profile-2-2-1-0")
+      END_BLOCK
+      BEGIN_BLOCK("profile-2-2-2-0")
+      END_BLOCK
+    END_BLOCK
+  
+    BEGIN_BLOCK("profile-3-1")
+      BEGIN_BLOCK("profile-3-3-1-3")
+        BEGIN_BLOCK("profile-3-3-1-3-1-0")
+        END_BLOCK
+        BEGIN_BLOCK("profile-3-3-1-3-2-0")
+        END_BLOCK
+        BEGIN_BLOCK("profile-3-3-1-3-3-0")
+        END_BLOCK
+      END_BLOCK
+    END_BLOCK
+  }
+```
+The naming convention of the blocks is such that the last number reflects the number of children of the block. The results are:
+```
+# Blocks sorted by self times summed over recursive invocations.
+name                               perc  %main        self time      calls   self time/call ticks/call
+profile-3-3-1-3                   17.62  17.62     0.0007671270     100000     0.0000000077          8
+main                              17.43  17.43     0.0007590300          1     0.0007590300     759030
+profile-2-2                       14.84  14.84     0.0006461510     100000     0.0000000065          6
+profile-3-1                        9.08   9.08     0.0003951170     100000     0.0000000040          4
+profile-1-1                        8.86   8.86     0.0003859370     100000     0.0000000039          4
+profile-0-0                        5.50   5.50     0.0002396430     100000     0.0000000024          2
+profile-3-3-1-3-3-0                4.75   4.75     0.0002067190     100000     0.0000000021          2
+profile-1-1-0                      4.60   4.60     0.0002003850     100000     0.0000000020          2
+profile-3-3-1-3-2-0                4.59   4.59     0.0001996320     100000     0.0000000020          2
+profile-2-2-1-0                    4.42   4.42     0.0001924850     100000     0.0000000019          2
+profile-2-2-2-0                    4.21   4.21     0.0001831880     100000     0.0000000018          2
+profile-3-3-1-3-1-0                4.10   4.10     0.0001783620     100000     0.0000000018          2
+```
+As you can see the correction works really well. Ideally the ticks/call should be 0 in this case. What you can also see is an intrinsic build-up of the error depending on the number of children, going from 2 (0 children) to 8 (three children). This is unavoidable, as the counters in the parent have to be stopped and started again (with the corresponding error) each time a child is started, otherwise you cannot correct for the intrinsic profile overhead.
 
 ## Recursion
 
 Profiling recursive procedures and functions is not easy. GWP solves this problem by profiling each invocation separately. DUMP_PROFILE shows both the time spent in each invocation and summed over invocations.
-DUMP_PROFILE will shorten large block names by removing vowels and underscores from the right until they are smaller than 32 characters.
 
 ## Example
 
-Here are the results for a 30 second run of my Draughts program GWD:
+Here are the results for a 30 second run of my Draughts program GWD. DUMP_PROFILE will shorten large block names by removing vowels and underscores from the right until they are smaller than 32 characters.
 ```
 # Profile dumped at 09:23:53-25/11/2018
 ## Resolution is 1000000000 counts/sec, or 0.0000000010 secs/count.
