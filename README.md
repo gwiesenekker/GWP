@@ -45,7 +45,7 @@ DUMP_PROFILE(VERBOSE)
 ```
 BLOCKS can be nested and recursion is supported.
 
-The macro's expand to code that collect the profile information when your program is compiled with -DPROFILE. Obviously BEGIN_BLOCK/END_BLOCK macro's have to match, so multiple returns within procedures and functions should be avoided.
+The macro's expand to code that collect the profile information when you compile your program with -DPROFILE. Obviously BEGIN_BLOCK/END_BLOCK macro's have to match, so multiple returns within procedures and functions should be avoided.
 
 Currently GWP uses hard-coded limits for the number of blocks (BLOCK_MAX), the number of recursive invocations (RECURSE_MAX), the call chain (STACK_MAX) and the number of threads (THREAD_MAX). Increase these as needed if you hit any of these limits.
 
@@ -68,12 +68,12 @@ Record the time t1
 //END_BLOCK
 Record the time t3
   Do some administration (the profile overhead):
-    //Self and total time are the same if there are no nested blocks
-    Increment the self-time of the block with t3 - t2
-    Increment the total-time of the block with t3 - t2
+    //Self time and total time are the same if there are no nested blocks
+    Increment block_self_time_total with t3 - t2
+    Increment block_time_total with t3 - t2
     Record the time t4
     Store t4 (confusingly called counter_overhead_end)
-    Increment the total-time with t4 - t1
+    Increment time_total with t4 - t1
 
 The profile overhead will be total-time - the self-time of the block
 ```
@@ -92,8 +92,8 @@ Record the time t1
 //END_BLOCK
 Record the time t3
   Do some administration (the profile overhead):
-    Increment the self-time of the block with t3 - t2
-    Increment the total-time of the block with t3 - t2
+    Increment block_self_time_total with t3 - t2
+    Increment block_time_total with t3 - t2
     Increment previous stack_time_total with current stack_time_total
     Setup a pointer that will record the time t4 in previous stack_counter_begin
     Record the time t4
@@ -232,7 +232,7 @@ NCALL=1000000 mean=188 nlarge=155 largest=44533
 NCALL=1000000 mean=188 nlarge=182 largest=44244
 NCALL=1000000 mean=189 nlarge=172 largest=44163
 ```
-Oddly, for one CPU (7) my AMD 1950x always returns very large largest deviations. So how should we correct for the intrinsic profile overhead? GWP uses the following method: after calculating t2 - t1 or t3 - t2, GWP takes two samples of the intrinsic profile overhead and subtracts it from t2 - t1 or t3 - t2. The idea of sampling instead of using a fixed value for the intrinsic profile overhead is that it adjusts for the intrinsic profile overhead at that point in time (perhaps the processor is 'slow'), but as you cannot know which value of the intrinsic profile overhead will be returned it will always be an approximation. It can also happen that t2 - t1 or t3 - t2 minus the intrinsic profile overhead is less than zero, especially if a large value for the intrinsic profile overhead is returned. In that case GWP returns zero.
+Oddly, for one CPU (7) my AMD 1950x always returns very large largest deviations. So how should we correct for the intrinsic profile overhead? GWP uses the following method: after calculating t2 - t1 or t3 - t2, GWP takes two samples of the intrinsic profile overhead and subtracts it from t2 - t1 or t3 - t2. The idea of sampling instead of using a fixed value for the intrinsic profile overhead is that it adjusts for the intrinsic profile overhead at that point in time (perhaps the counter is 'slow'), but as you cannot know which value of the intrinsic profile overhead will be returned it will always be an approximation. It can also happen that t2 - t1 or t3 - t2 minus the intrinsic profile overhead is less than zero, especially if a large value for the intrinsic profile overhead is returned. In that case GWP uses zero for t2 - t1 or t3 - t2.
 
 So how well does the correction work? The self-times of all the following blocks should be 0 ticks:
 ```
