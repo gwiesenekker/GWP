@@ -159,12 +159,12 @@ int main(int argc, char **argv)
       update_mean_sigma(n, counter_dummy - counter_stamp, NULL, &mn, &sn);
     }
 
-    //note that the distribution is very skewed, so the distribution
-    //is not normal
-    //deviations LESS than the mean (or the mean - sigma) hardly ever occur
-    //but deviations LRRGER than (mean + sigma) do occur more often
+    //note that the distribution is very skewed to the right, so the distribution
+    //is not normal, the standard deviation has no meaning.
+    //deviations LESS than the mean hardly ever occur
+    //but deviations LARGER than the mean do occur more often
  
-    //arbitrarily set the standard deviation to one-third of the mean
+    //arbitrarily set the 'standard deviation' to one-third of the mean
     //to check for large positive deviations
     //sigma = round(sqrt(sigma / NCALL));
 
