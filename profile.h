@@ -1,5 +1,5 @@
 #ifndef ProfileH
-//SCU REVISION 0.588 za 23 apr 2022 14:29:57 CEST
+//SCU REVISION 0.589 ma 25 apr 2022  9:43:39 CEST
 #define ProfileH
 
 #ifdef PROFILE
@@ -17,12 +17,12 @@
 #define PG profile_global[pid]
 #define PS profile_static[pid]
 
-typedef unsigned long long profile_t;
+typedef struct timespec counter_t;
 
 typedef struct
 {
-  profile_t volatile counter_stamp;
-  profile_t volatile *counter_pointer;
+  counter_t counter_stamp;
+  counter_t *counter_pointer;
 } profile_global_t;
 
 typedef struct
@@ -43,16 +43,13 @@ void init_profile(void);
 void clear_profile(void);
 void dump_profile(int, int);
 
-#define COUNTER_VARIABLE(V)\
-  {struct timespec tv; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &tv); V = tv.tv_sec * 1000000000 + tv.tv_nsec;}
-#define COUNTER_POINTER(P)\
-  {struct timespec tv; clock_gettime(CLOCK_THREAD_CPUTIME_ID, &tv); *(P) = tv.tv_sec * 1000000000 + tv.tv_nsec;}
+#define GET_COUNTER(P) clock_gettime(CLOCK_THREAD_CPUTIME_ID, P)
 
 #define BEGIN_BLOCK(X) \
   {\
     static profile_static_t profile_static[THREAD_MAX];\
-    profile_t counter_stamp;\
-    COUNTER_VARIABLE(counter_stamp)\
+    counter_t counter_stamp;\
+    GET_COUNTER(&counter_stamp);\
     int pid = PID;\
     PG.counter_stamp = counter_stamp;\
     if (PS.block_init == 0) {init_block(PS.block_id); PS.block_init = 1;}\
@@ -60,16 +57,16 @@ void dump_profile(int, int);
     if (PS.block_id[PS.block_invocation] == PROFILE_INVALID)\
       PS.block_id[PS.block_invocation] = new_block(pid, X, &(PS.block_invocation));\
     begin_block(pid, PS.block_id[PS.block_invocation]);\
-    COUNTER_POINTER(PG.counter_pointer)\
+    GET_COUNTER(PG.counter_pointer);\
   }
 #define END_BLOCK \
   {\
-    profile_t counter_stamp;\
-    COUNTER_VARIABLE(counter_stamp)\
+    counter_t counter_stamp;\
+    GET_COUNTER(&counter_stamp);\
     int pid = PID;\
     PG.counter_stamp = counter_stamp;\
     end_block(pid);\
-    COUNTER_POINTER(PG.counter_pointer)\
+    GET_COUNTER(PG.counter_pointer);\
   }
 
 #define INIT_PROFILE init_profile();

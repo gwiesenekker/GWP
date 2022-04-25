@@ -1,5 +1,5 @@
 #include "profile.h"
-//SCU REVISION 0.588 za 23 apr 2022 14:29:57 CEST
+//SCU REVISION 0.589 ma 25 apr 2022  9:43:39 CEST
 
 #ifdef PROFILE
 
@@ -21,8 +21,9 @@
 #define BLOCK_MAX 100
 #define STACK_MAX 100
 
-#define SECS(X) ((double) (X) / (double) frequency)
-#define PERC(X) ((X) / time_self_total * 100)
+#define TICKS(TV) (TV.tv_sec * 1000000000 + TV.tv_nsec)
+#define SECS(X)   ((double) (X) / (double) frequency)
+#define PERC(X)   ((X) / time_self_total * 100)
 
 #define PL profile_local[pid]
 
@@ -34,8 +35,8 @@ typedef struct
   double stack_time_self;
   double stack_time_total;
 
-  profile_t stack_count_begin;
-  profile_t stack_count_end;
+  counter_t stack_counter_begin;
+  counter_t stack_counter_end;
 } stack_t;
 
 typedef struct
@@ -82,8 +83,8 @@ typedef struct
   int nblock;
   block_t block[BLOCK_MAX];
 
-  profile_t counter_overhead_begin;
-  profile_t counter_overhead_end;
+  counter_t counter_overhead_begin;
+  counter_t counter_overhead_end;
   double time_total;
 } profile_local_t;
 
@@ -97,8 +98,8 @@ local pthread_mutex_t profile_mutex;
 local int tids[THREAD_MAX];
 local profile_local_t profile_local[THREAD_MAX];
 
-local profile_t frequency;
-local profile_t counter_dummy;
+local long long frequency;
+local counter_t counter_dummy;
 
 #define NEXCEPTIONS_MAX 1024
 
@@ -251,12 +252,12 @@ local long long counter_correction(int pid, long long counter_delta)
 
   for (long long n = 1; n <= NCALIBRATION; ++n)
   {
-    profile_t volatile counter_stamp;
+    counter_t counter_stamp;
   
-    COUNTER_VARIABLE(counter_stamp)
-    COUNTER_POINTER(PG.counter_pointer)
+    GET_COUNTER(&counter_stamp);
+    GET_COUNTER(PG.counter_pointer);
   
-    update_mean_sigma(n, counter_dummy - counter_stamp, &mn, &sn);
+    update_mean_sigma(n, TICKS(counter_dummy) - TICKS(counter_stamp), &mn, &sn);
   }
 
   long long result = round(mn);
@@ -274,17 +275,17 @@ void begin_block(int pid, int block_id)
   {
     stack_t *with_previous = PL.stack + PL.nstack - 1;
 
-    with_previous->stack_count_end = PG.counter_stamp;
+    with_previous->stack_counter_end = PG.counter_stamp;
 
-    long long counter_delta = 
-      with_previous->stack_count_end - with_previous->stack_count_begin;
+    long long counter_delta = TICKS(with_previous->stack_counter_end) -
+                              TICKS(with_previous->stack_counter_begin);
 
     with_previous->stack_time_self +=
       SECS(counter_correction(pid, counter_delta));
   }
   else
   {
-    COUNTER_VARIABLE(PL.counter_overhead_begin)
+    GET_COUNTER(&(PL.counter_overhead_begin));
   }
   PROFILE_BUG(PL.nstack >= STACK_MAX)
 
@@ -296,7 +297,7 @@ void begin_block(int pid, int block_id)
 
   with_current->stack_time_total = 0.0;
 
-  PG.counter_pointer = &(with_current->stack_count_begin);
+  PG.counter_pointer = &(with_current->stack_counter_begin);
 
   PL.nstack++;
 }
@@ -309,10 +310,10 @@ void end_block(int pid)
 
   stack_t *with_current = PL.stack + PL.nstack;
 
-  with_current->stack_count_end = PG.counter_stamp;
+  with_current->stack_counter_end = PG.counter_stamp;
 
-  long long counter_delta = 
-    with_current->stack_count_end - with_current->stack_count_begin;
+  long long counter_delta = TICKS(with_current->stack_counter_end) -
+                            TICKS(with_current->stack_counter_begin);
 
   with_current->stack_time_self +=
     SECS(counter_correction(pid, counter_delta));
@@ -339,7 +340,7 @@ void end_block(int pid)
 
     with_previous->stack_time_total += with_current->stack_time_total;
 
-    PG.counter_pointer = &(with_previous->stack_count_begin);
+    PG.counter_pointer = &(with_previous->stack_counter_begin);
 
     //update parent in child
 
@@ -363,9 +364,10 @@ void end_block(int pid)
   }
   else
   {
-    COUNTER_VARIABLE(PL.counter_overhead_end)
+    GET_COUNTER(&(PL.counter_overhead_end));
  
-    counter_delta = PL.counter_overhead_end - PL.counter_overhead_begin;
+    counter_delta = TICKS(PL.counter_overhead_end) -
+                    TICKS(PL.counter_overhead_begin);
 
     PL.time_total += SECS(counter_delta);
   }
@@ -448,12 +450,12 @@ void init_profile(void)
 
   for (long long n = 1; n <= NCALL; ++n)
   {
-    profile_t volatile counter_stamp;
+    counter_t counter_stamp;
   
-    COUNTER_VARIABLE(counter_stamp)
-    COUNTER_POINTER(PG.counter_pointer)
+    GET_COUNTER(&counter_stamp);
+    GET_COUNTER(PG.counter_pointer);
   
-    update_mean_sigma(n, counter_dummy - counter_stamp, &mn, &sn);
+    update_mean_sigma(n, TICKS(counter_dummy) - TICKS(counter_stamp), &mn, &sn);
   }
   counter_mean = round(mn);
   counter_sigma = round(mn / 3.0);
@@ -463,12 +465,13 @@ void init_profile(void)
 
   for (long long n = 1; n <= NCALL; ++n)
   {
-    profile_t volatile counter_stamp;
+    counter_t counter_stamp;
   
-    COUNTER_VARIABLE(counter_stamp)
-    COUNTER_POINTER(PG.counter_pointer)
+    GET_COUNTER(&counter_stamp);
+    GET_COUNTER(PG.counter_pointer);
 
-    long long delta = counter_dummy - counter_stamp;
+    long long delta = TICKS(counter_dummy) - TICKS(counter_stamp);
+
     if (delta > (counter_mean + 3 * counter_sigma))
     {
       ++ncounter_largest;
@@ -504,7 +507,7 @@ void dump_profile(int pid, int verbose)
   fprintf(f, "# The intrinsic profile overhead is %lld ticks on average.\n",
     counter_mean);
   fprintf(f, "# %lld out of %lld samples of the intrinsic profile overhead\n"
-             "# ..are larger than twice the mean, with a largest deviation of %lld.\n",
+             "# ..are larger than twice the mean, the largest value is %lld.\n",
              ncounter_largest, NCALL, counter_largest);
 
   fprintf(f, "# The total number of blocks is %d.\n", PL.nblock);
