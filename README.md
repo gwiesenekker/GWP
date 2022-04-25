@@ -104,7 +104,7 @@ Record the time t3
 
 So the minimum unavoidable or intrinsic profile overhead is the sequence:
 ```
-Record the time t1 in a variable
+Store the time t1 in a variable
 Store the time t2 in a pointer
 ```
 Ideally t2 - t1 should be zero if there is no code executed between t1 and t2. Recently I started to notice some strange results when profiling small functions (less than 100 ticks) that were called many times, so I decided to take a look at how large the intrinsic profile overhead is using the following program. You can compile it standalone if you are interested in what the intrinsic profile overhead looks like on your system.
